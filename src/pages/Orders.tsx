@@ -29,20 +29,10 @@ export default function Orders() {
   const splitProblem = isSplit ? splitError(total, Number(mpesa)) : null;
   const canSave = !!item && totalOk && !splitProblem && !saving;
   const shown = menu.items.filter((i) => i.item_name.toLowerCase().includes(search.toLowerCase()));
-  const typed = search.trim();
-  const exactMatch = menu.items.some((i) => i.item_name.toLowerCase() === typed.toLowerCase());
 
   function pick(i: MenuItem) {
     setItem(i);
     setPrice(String(i.selling_price)); // auto-fill price
-    setQty("1");
-    setSearch("");
-  }
-
-  /** Item that is not on the menu: the cashier types the name and the price. */
-  function pickTyped() {
-    setItem({ id: "typed", item_name: typed.toUpperCase(), category: "Not on menu", selling_price: 0, unit_type: null, track_stock: false });
-    setPrice(""); // cashier enters the price
     setQty("1");
     setSearch("");
   }
@@ -93,29 +83,21 @@ export default function Orders() {
           <div className="flex items-center justify-between rounded-xl bg-brand-soft p-3">
             <div>
               <div className="text-xl font-extrabold">{item.item_name}</div>
-              <div className="text-muted">
-                {item.id === "typed" ? "Not on the menu: enter the price below" : `${formatMoney(item.selling_price)}${item.unit_type ? ` / ${item.unit_type}` : ""}`}
-              </div>
+              <div className="text-muted">{formatMoney(item.selling_price)}{item.unit_type ? ` / ${item.unit_type}` : ""}</div>
             </div>
             <Button small variant="outline" onClick={() => setItem(null)}>Change</Button>
           </div>
         ) : (
           <Field label="Food item">
-            <input className={inputCls} placeholder="Search the menu or type any food…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input className={inputCls} placeholder="Search the menu…" value={search} onChange={(e) => setSearch(e.target.value)} />
             <div className="mt-2 grid max-h-72 gap-2 overflow-y-auto">
-              {typed && !exactMatch && (
-                <button type="button" onClick={pickTyped} className="flex min-h-14 items-center justify-between rounded-xl border-2 border-dashed border-brand bg-brand-soft px-4 text-left font-bold active:opacity-80">
-                  <span className="text-lg">Use “{typed.toUpperCase()}”</span>
-                  <span className="text-sm text-muted">not on menu · set price</span>
-                </button>
-              )}
               {shown.map((i) => (
                 <button key={i.id} type="button" onClick={() => pick(i)} className="flex min-h-14 items-center justify-between rounded-xl border-2 border-line bg-white px-4 text-left active:bg-brand-soft">
                   <span><span className="block text-lg font-bold">{i.item_name}</span><span className="text-xs text-muted">{i.category}</span></span>
                   <span className="font-bold tabular-nums">{formatMoney(i.selling_price)}</span>
                 </button>
               ))}
-              {shown.length === 0 && !typed && <Empty>{menu.items.length ? "No match" : "Menu is empty. Ask the admin to add items."}</Empty>}
+              {shown.length === 0 && <Empty>{menu.items.length ? "No match" : "Menu is empty. Ask the admin to add items."}</Empty>}
             </div>
           </Field>
         )}
