@@ -1,5 +1,4 @@
 // Orders: type fast (Quick Type) or tap, review the order, pick payment once, save.
-// Every saved line is a real menu item (or a clearly marked "other item"), so stock and sales can match.
 import { useEffect, useMemo, useState } from "react";
 import { addDays, formatMoney, formatTime, supabase } from "../lib/api";
 import { allocateSplit, paymentFields, round2, splitCash, splitError } from "../lib/money";
@@ -14,9 +13,9 @@ const PAID_METHODS = ["Cash", "M-Pesa", "Cash + M-Pesa"] as const;
 
 interface Line {
   key: string;
-  item: MenuItem | null; // null = not sure yet (or an "other" item)
-  label: string; // name saved in the sale
-  query: string; // what the waiter typed, used for learning
+  item: MenuItem | null;
+  label: string;
+  query: string;
   qty: number;
   price: string;
   other: boolean;
@@ -48,7 +47,6 @@ export default function Orders() {
   const [table, setTable] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // ---- popular items: top 8 sold in the last 7 days (what this login is allowed to see) ----
   useEffect(() => {
     let ignore = false;
     void supabase.from("hotel_sales").select("food_item, quantity").gte("sale_date", addDays(date, -7)).limit(3000)
@@ -66,7 +64,6 @@ export default function Orders() {
     [popular, menu.items],
   );
 
-  // ---- Quick Type: live preview of what the app understood ----
   const preview = useMemo(() => parseOrder(quick, menu.items, learned), [quick, menu.items, learned]);
 
   function addItem(item: MenuItem, qty = 1) {
@@ -107,7 +104,6 @@ export default function Orders() {
   const patch = (key: string, p: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
   const drop = (key: string) => setLines((ls) => ls.filter((l) => l.key !== key));
 
-  // ---- totals and payment ----
   const total = round2(lines.reduce((s, l) => s + (lineReady(l) ? lineTotal(l) : 0), 0));
   const unresolved = lines.filter((l) => l.item === null && !l.other).length;
   const allReady = lines.length > 0 && lines.every(lineReady);
@@ -135,7 +131,6 @@ export default function Orders() {
         table_no: table.trim() || null, notes: l.other ? OTHER_NOTE : null, ...pay,
       };
     });
-    // One insert call for all lines: either the whole order is saved or none of it.
     const { error } = await supabase.from("hotel_sales").insert(rows);
     if (error) flash(error.message, true);
     else {
@@ -146,7 +141,6 @@ export default function Orders() {
     setSaving(false);
   }
 
-  // ---- the shift's orders ----
   const groups = useMemo(() => groupOrders(sales.rows), [sales.rows]);
   const listTotal = round2(sales.rows.reduce((s, r) => s + Number(r.total_cost), 0));
   const canMarkPaid = role === "admin" || role === "cashier";
@@ -164,7 +158,6 @@ export default function Orders() {
     const grand = round2(totals.reduce((s, n) => s + n, 0));
     const mpesaTotal = how === "M-Pesa" ? grand : how === "Cash" ? 0 : mpesaAmount;
     const shares = how === "M-Pesa" ? totals.map((t) => ({ mpesa: t, cash: 0 })) : allocateSplit(totals, mpesaTotal);
-    // Only the payment fields change. The amounts stay exactly as they were entered.
     const results = await Promise.all(
       g.rows.map((r, i) =>
         supabase.from("hotel_sales").update({ ...paymentFields(totals[i]!, shares[i]!.mpesa), check_status: "OK" }).eq("id", r.id),
@@ -177,188 +170,181 @@ export default function Orders() {
   }
 
   return (
-    <div className="grid gap-4">
-      {menu.error && <ErrorBox>{menu.error}</ErrorBox>}
+    <div className="grid gap-4 items-start lg:grid-cols-12">
+      {menu.error && <div className="lg:col-span-12"><ErrorBox>{menu.error}</ErrorBox></div>}
 
-      <Card className="grid gap-4">
-        <Title hint={lines.length ? `${lines.length} item${lines.length > 1 ? "s" : ""}` : undefined}>New order</Title>
+      <div className="lg:col-span-7 xl:col-span-8 space-y-4">
+        <Card className="grid gap-4">
+          <Title hint={lines.length ? `${lines.length} item${lines.length > 1 ? "s" : ""}` : undefined}>New order</Title>
 
-        {/* ---------- Quick Type ---------- */}
-        <Field label="Quick type (example: chai x2 + chapo)">
-          <input
-            className={inputCls} placeholder="Type the order, then press Add" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-            value={quick} onChange={(e) => setQuick(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitQuick(); } }}
-          />
-        </Field>
-        {preview.length > 0 && (
-          <div className="grid gap-2">
-            <div className="flex flex-wrap gap-2">
-              {preview.map((p, i) => (
-                <span key={i} className={`rounded-full px-3 py-1 text-sm font-bold ${p.item ? "bg-ok-soft text-green-800" : "bg-danger-soft text-danger"}`}>
-                  {p.item ? `${p.item.item_name} × ${p.qty}` : `? ${p.raw}`}
-                </span>
-              ))}
+          <Field label="Quick type (example: chai x2 + chapo)">
+            <input
+              className={inputCls} placeholder="Type the order, then press Add" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+              value={quick} onChange={(e) => setQuick(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitQuick(); } }}
+            />
+          </Field>
+          {preview.length > 0 && (
+            <div className="grid gap-2">
+              <div className="flex flex-wrap gap-2">
+                {preview.map((p, i) => (
+                  <span key={i} className={`rounded-full px-3 py-1 text-sm font-bold ${p.item ? "bg-ok-soft text-green-800" : "bg-danger-soft text-danger"}`}>
+                    {p.item ? `${p.item.item_name} × ${p.qty}` : `? ${p.raw}`}
+                  </span>
+                ))}
+              </div>
+              <Button onClick={commitQuick}>Add to order</Button>
             </div>
-            <Button onClick={commitQuick}>Add to order</Button>
-          </div>
-        )}
+          )}
 
-        {/* ---------- Popular and tap mode ---------- */}
-        {popularItems.length > 0 && (
-          <div>
-            <div className="mb-1 text-sm font-semibold text-muted">Popular this week</div>
-            <div className="flex flex-wrap gap-2">
-              {popularItems.map((m) => (
-                <button key={m.id} type="button" onClick={() => addItem(m)} className="min-h-12 rounded-xl border-2 border-brand px-3 text-sm font-bold text-brand active:bg-brand-soft">
-                  {m.item_name}
-                </button>
-              ))}
+          {popularItems.length > 0 && (
+            <div>
+              <div className="mb-1 text-sm font-semibold text-muted">Popular this week</div>
+              <div className="flex flex-wrap gap-2">
+                {popularItems.map((m) => (
+                  <button key={m.id} type="button" onClick={() => addItem(m)} className="min-h-12 rounded-xl border-2 border-brand px-3 text-sm font-bold text-brand active:bg-brand-soft">
+                    {m.item_name}
+                  </button>
+                ))}
+              </div>
             </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="outline" onClick={() => setBrowse((b) => !b)}>{browse ? "Hide menu" : "Browse menu"}</Button>
+            <Button variant="outline" onClick={() => setOtherOpen((o) => !o)}>Other item</Button>
           </div>
-        )}
 
-        <div className="grid grid-cols-2 gap-2">
-          <Button variant="outline" onClick={() => setBrowse((b) => !b)}>{browse ? "Hide menu" : "Browse menu"}</Button>
-          <Button variant="outline" onClick={() => setOtherOpen((o) => !o)}>Other item</Button>
-        </div>
-
-        {browse && (
-          <div>
-            <input className={inputCls} placeholder="Search the menu" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <div className="mt-2 grid max-h-72 gap-2 overflow-y-auto">
-              {shown.map((i) => (
-                <button key={i.id} type="button" onClick={() => addItem(i)} className="flex min-h-14 items-center justify-between rounded-xl border-2 border-line bg-white px-4 text-left active:bg-brand-soft">
-                  <span><span className="block text-lg font-bold">{i.item_name}</span><span className="text-xs text-muted">{i.category}</span></span>
-                  <span className="font-bold tabular-nums">{formatMoney(i.selling_price)}</span>
-                </button>
-              ))}
-              {shown.length === 0 && <Empty>{menu.items.length ? "No match" : "Menu is empty. Ask the admin to add items."}</Empty>}
+          {browse && (
+            <div>
+              <input className={inputCls} placeholder="Search the menu" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div className="mt-2 grid max-h-72 gap-2 overflow-y-auto">
+                {shown.map((i) => (
+                  <button key={i.id} type="button" onClick={() => addItem(i)} className="flex min-h-14 items-center justify-between rounded-xl border-2 border-line bg-white px-4 text-left active:bg-brand-soft">
+                    <span><span className="block text-lg font-bold">{i.item_name}</span><span className="text-xs text-muted">{i.category}</span></span>
+                    <span className="font-bold tabular-nums">{formatMoney(i.selling_price)}</span>
+                  </button>
+                ))}
+                {shown.length === 0 && <Empty>{menu.items.length ? "No match" : "Menu is empty. Ask the admin to add items."}</Empty>}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {otherOpen && (
-          <div className="grid gap-2 rounded-xl border-2 border-dashed border-line p-3">
-            <p className="text-sm text-muted">For something not on the menu (soup, cabbage...). It is saved and marked as "other" so the admin can add it to the menu.</p>
-            <input className={inputCls} placeholder="Item name" value={otherName} onChange={(e) => setOtherName(e.target.value)} />
-            <input className={inputCls} inputMode="decimal" placeholder="Price (KSh)" value={otherPrice} onChange={(e) => setOtherPrice(e.target.value)} />
-            <Button disabled={!otherName.trim() || !(Number(otherPrice) > 0)} onClick={addOther}>Add other item</Button>
-          </div>
-        )}
+          {otherOpen && (
+            <div className="grid gap-2 rounded-xl border-2 border-dashed border-line p-3">
+              <p className="text-sm text-muted">For something not on the menu (soup, cabbage...). It is saved and marked as "other".</p>
+              <input className={inputCls} placeholder="Item name" value={otherName} onChange={(e) => setOtherName(e.target.value)} />
+              <input className={inputCls} inputMode="decimal" placeholder="Price (KSh)" value={otherPrice} onChange={(e) => setOtherPrice(e.target.value)} />
+              <Button disabled={!otherName.trim() || !(Number(otherPrice) > 0)} onClick={addOther}>Add other item</Button>
+            </div>
+          )}
 
-        {/* ---------- The order so far ---------- */}
-        {lines.length > 0 && (
-          <ul className="grid gap-3">
-            {lines.map((l) => (
-              <li key={l.key} className={`rounded-xl border-2 p-3 ${l.item || l.other ? "border-line" : "border-danger bg-danger-soft/40"}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="truncate text-lg font-extrabold">{l.item || l.other ? l.label : `? ${l.label}`}</div>
-                    {l.other && <Badge tone="amber">other item</Badge>}
+          {lines.length > 0 && (
+            <ul className="grid gap-3 md:grid-cols-2">
+              {lines.map((l) => (
+                <li key={l.key} className={`rounded-xl border-2 p-3 ${l.item || l.other ? "border-line" : "border-danger bg-danger-soft/40"}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-lg font-extrabold">{l.item || l.other ? l.label : `? ${l.label}`}</div>
+                      {l.other && <Badge tone="amber">other item</Badge>}
+                    </div>
+                    <Button small variant="danger" onClick={() => drop(l.key)} aria-label="Remove">✕</Button>
                   </div>
-                  <Button small variant="danger" onClick={() => drop(l.key)} aria-label="Remove">✕</Button>
-                </div>
 
-                {!l.item && !l.other && (
-                  <div className="mt-2">
-                    <div className="mb-1 text-sm font-semibold text-danger">Not sure which item this is. Tap the right one:</div>
-                    <div className="flex flex-wrap gap-2">
-                      {l.suggestions.map((s) => (
-                        <button key={s.id} type="button" onClick={() => resolve(l.key, s)} className="min-h-12 rounded-xl border-2 border-brand bg-white px-3 text-sm font-bold text-brand active:bg-brand-soft">
-                          {s.item_name}
+                  {!l.item && !l.other && (
+                    <div className="mt-2">
+                      <div className="mb-1 text-sm font-semibold text-danger">Not sure which item this is. Tap the right one:</div>
+                      <div className="flex flex-wrap gap-2">
+                        {l.suggestions.map((s) => (
+                          <button key={s.id} type="button" onClick={() => resolve(l.key, s)} className="min-h-12 rounded-xl border-2 border-brand bg-white px-3 text-sm font-bold text-brand active:bg-brand-soft">
+                            {s.item_name}
+                          </button>
+                        ))}
+                        <button type="button" onClick={() => { setBrowse(true); setSearch(l.query); }} className="min-h-12 rounded-xl border-2 border-line bg-white px-3 text-sm font-bold text-muted">
+                          Search menu
                         </button>
-                      ))}
-                      <button type="button" onClick={() => { setBrowse(true); setSearch(l.query); }} className="min-h-12 rounded-xl border-2 border-line bg-white px-3 text-sm font-bold text-muted">
-                        Search menu
-                      </button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {(l.item || l.other) && (
-                  <div className="mt-2 grid grid-cols-[auto_1fr_auto] items-end gap-3">
-                    <div className="grid grid-cols-[3rem_3rem_3rem] items-center gap-1">
-                      <Button small variant="outline" className="!px-0" onClick={() => patch(l.key, { qty: Math.max(1, l.qty - 1) })} aria-label="Less">−</Button>
-                      <div className="text-center text-xl font-extrabold tabular-nums">{l.qty}</div>
-                      <Button small variant="outline" className="!px-0" onClick={() => patch(l.key, { qty: l.qty + 1 })} aria-label="More">+</Button>
+                  {(l.item || l.other) && (
+                    <div className="mt-2 grid grid-cols-[auto_1fr_auto] items-end gap-3">
+                      <div className="grid grid-cols-[3rem_3rem_3rem] items-center gap-1">
+                        <Button small variant="outline" className="!px-0" onClick={() => patch(l.key, { qty: Math.max(1, l.qty - 1) })} aria-label="Less">−</Button>
+                        <div className="text-center text-xl font-extrabold tabular-nums">{l.qty}</div>
+                        <Button small variant="outline" className="!px-0" onClick={() => patch(l.key, { qty: l.qty + 1 })} aria-label="More">+</Button>
+                      </div>
+                      <label className="block">
+                        <span className="text-[11px] font-semibold text-muted">Price each</span>
+                        <input className="h-12 w-full rounded-lg border-2 border-line px-2 text-center text-lg" inputMode="decimal" value={l.price} onChange={(e) => patch(l.key, { price: e.target.value })} />
+                      </label>
+                      <div className="pb-2 text-lg font-bold tabular-nums">{formatMoney(lineReady(l) ? lineTotal(l) : 0)}</div>
                     </div>
-                    <label className="block">
-                      <span className="text-[11px] font-semibold text-muted">Price each</span>
-                      <input className="h-12 w-full rounded-lg border-2 border-line px-2 text-center text-lg" inputMode="decimal" value={l.price} onChange={(e) => patch(l.key, { price: e.target.value })} />
-                    </label>
-                    <div className="pb-2 text-lg font-bold tabular-nums">{formatMoney(lineReady(l) ? lineTotal(l) : 0)}</div>
-                  </div>
-                )}
-              </li>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {lines.length > 0 && (
+            <>
+              <div className="rounded-xl bg-brand p-3 text-center text-white">
+                <div className="text-sm opacity-80">Total</div>
+                <div className="text-3xl font-extrabold tabular-nums">{formatMoney(total)}</div>
+              </div>
+
+              <Field label="Payment (for the whole order)" group>
+                <Segmented options={METHODS} value={method} onChange={(m) => { setMethod(m); setMpesa(""); }} cols={2} />
+              </Field>
+
+              {isSplit && (
+                <div className="grid gap-2">
+                  <Field label="M-Pesa amount (KSh)">
+                    <input className={inputCls} inputMode="decimal" placeholder="How much came by M-Pesa?" value={mpesa} onChange={(e) => setMpesa(e.target.value)} />
+                  </Field>
+                  {splitProblem ? (
+                    <p className={`text-sm font-semibold ${mpesa ? "text-danger" : "text-muted"}`}>{splitProblem}</p>
+                  ) : (
+                    <p className="rounded-xl bg-ok-soft p-3 text-center text-lg font-bold text-green-800">Cash to collect: {formatMoney(splitCash(total, Number(mpesa)))}</p>
+                  )}
+                </div>
+              )}
+
+              <Field label="Table no. (optional)">
+                <input className={inputCls} value={table} onChange={(e) => setTable(e.target.value)} />
+              </Field>
+            </>
+          )}
+
+          {unresolved > 0 && (
+            <p className="rounded-xl bg-danger-soft p-3 text-center text-sm font-bold text-danger">
+              {unresolved} item{unresolved > 1 ? "s" : ""} not matched yet. Tap the right item above to unlock Save.
+            </p>
+          )}
+          <Button disabled={!canSave} onClick={() => void save()}>
+            {saving ? "Saving…" : allReady ? `Save order · ${formatMoney(total)}` : "Save order"}
+          </Button>
+        </Card>
+      </div>
+
+      <div className="lg:col-span-5 xl:col-span-4">
+        <Card>
+          <Title hint={`${groups.length} · ${formatMoney(listTotal)}`}>{shift} shift orders</Title>
+          {sales.error && <ErrorBox>{sales.error}</ErrorBox>}
+          {groups.length === 0 && <Empty>No orders yet.</Empty>}
+          <ul className="divide-y divide-line">
+            {groups.map((g) => (
+              <OrderRow key={g.key} g={g} canMarkPaid={canMarkPaid} onDelete={() => void remove(g)} onPaid={markPaid} />
             ))}
           </ul>
-        )}
-
-        {lines.length > 0 && (
-          <>
-            <div className="rounded-xl bg-brand p-3 text-center text-white">
-              <div className="text-sm opacity-80">Total</div>
-              <div className="text-3xl font-extrabold tabular-nums">{formatMoney(total)}</div>
-            </div>
-
-            <Field label="Payment (for the whole order)" group>
-              <Segmented options={METHODS} value={method} onChange={(m) => { setMethod(m); setMpesa(""); }} cols={2} />
-            </Field>
-
-            {isSplit && (
-              <div className="grid gap-2">
-                <Field label="M-Pesa amount (KSh)">
-                  <input className={inputCls} inputMode="decimal" placeholder="How much came by M-Pesa?" value={mpesa} onChange={(e) => setMpesa(e.target.value)} />
-                </Field>
-                {splitProblem ? (
-                  <p className={`text-sm font-semibold ${mpesa ? "text-danger" : "text-muted"}`}>{splitProblem}</p>
-                ) : (
-                  <p className="rounded-xl bg-ok-soft p-3 text-center text-lg font-bold text-green-800">Cash to collect: {formatMoney(splitCash(total, Number(mpesa)))}</p>
-                )}
-              </div>
-            )}
-
-            <Field label="Table no. (optional)">
-              <input className={inputCls} value={table} onChange={(e) => setTable(e.target.value)} />
-            </Field>
-          </>
-        )}
-
-        {unresolved > 0 && (
-          <p className="rounded-xl bg-danger-soft p-3 text-center text-sm font-bold text-danger">
-            {unresolved} item{unresolved > 1 ? "s" : ""} not matched yet. Tap the right item above to unlock Save.
-          </p>
-        )}
-        <Button disabled={!canSave} onClick={() => void save()}>
-          {saving ? "Saving…" : allReady ? `Save order · ${formatMoney(total)}` : "Save order"}
-        </Button>
-      </Card>
-
-      {/* ---------- Orders of this shift ---------- */}
-      <Card>
-        <Title hint={`${groups.length} · ${formatMoney(listTotal)}`}>{shift} shift orders</Title>
-        {sales.error && <ErrorBox>{sales.error}</ErrorBox>}
-        {groups.length === 0 && <Empty>No orders yet.</Empty>}
-        <ul className="divide-y divide-line">
-          {groups.map((g) => (
-            <OrderRow key={g.key} g={g} canMarkPaid={canMarkPaid} onDelete={() => void remove(g)} onPaid={markPaid} />
-          ))}
-        </ul>
-      </Card>
+        </Card>
+      </div>
       <Flash msg={msg} />
     </div>
   );
 }
 
-function OrderRow({
-  g, canMarkPaid, onDelete, onPaid,
-}: {
-  g: OrderGroup;
-  canMarkPaid: boolean;
-  onDelete: () => void;
-  onPaid: (g: OrderGroup, how: (typeof PAID_METHODS)[number], mpesa: number) => Promise<void>;
-}) {
+function OrderRow({ g, canMarkPaid, onDelete, onPaid }: { g: OrderGroup; canMarkPaid: boolean; onDelete: () => void; onPaid: (g: OrderGroup, how: (typeof PAID_METHODS)[number], mpesa: number) => Promise<void>; }) {
   const [open, setOpen] = useState(false);
   const [how, setHow] = useState<(typeof PAID_METHODS)[number]>("Cash");
   const [mpesa, setMpesa] = useState("");

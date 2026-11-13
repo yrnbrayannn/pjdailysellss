@@ -1,5 +1,4 @@
-// Stock: the daily stock sheet (opening, added, total, closing, sold, amount) per section,
-// plus deliveries, transfers, wastage and issue reports.
+// Stock: the daily stock sheet, responsive for desktop.
 import { useEffect, useMemo, useState } from "react";
 import { addDays, formatMoney, getAll, supabase } from "../lib/api";
 import { round2 } from "../lib/money";
@@ -20,8 +19,8 @@ export default function Stock() {
   useEffect(() => { getAll<Supplier>("suppliers", "name").then(setSuppliers).catch(() => setSuppliers([])); }, []);
 
   return (
-    <div className="grid gap-4">
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4">
+    <div className="grid gap-4 max-w-5xl mx-auto">
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 md:mx-0 md:flex-wrap md:px-0">
         {TABS.map((t) => (
           <button
             key={t} type="button" onClick={() => setTab(t)}
@@ -63,7 +62,6 @@ function Sheet({ section }: { section: Section }) {
   const [tick, setTick] = useState(0);
   const { msg, flash } = useFlash();
 
-  // Counts of the last 8 days of this section (to pre-fill opening from the last closing)
   useEffect(() => {
     let ignore = false;
     void supabase.from("stock_takes").select("*").eq("section", section)
@@ -96,7 +94,6 @@ function Sheet({ section }: { section: Section }) {
     setVals((v) => ({ ...v, [name]: { ...(v[name] ?? { opening: "", closing: "" }), [field]: value } }));
   }
 
-  // Everything the sheet shows is worked out here, live, from what is typed.
   const figures = (name: string, price: number) => {
     const v = vals[name] ?? { opening: "", closing: "" };
     const opening = num(v.opening);
@@ -150,15 +147,15 @@ function Sheet({ section }: { section: Section }) {
       <Card className="grid gap-3">
         <Title hint={`${counted} of ${stock.items.length} closed`}>{section} stock sheet</Title>
         {(error || stock.error || adds.error) && <ErrorBox>{error ?? stock.error ?? adds.error}</ErrorBox>}
-        <p className="text-sm text-muted">Fill Opening at the start of the shift and Closing at the end. You can save now and add Closing later.</p>
+        <p className="text-sm text-muted">Fill Opening at the start of the shift and Closing at the end.</p>
         <input className={inputCls} placeholder="Search items" value={filter} onChange={(e) => setFilter(e.target.value)} />
         {stock.items.length === 0 && <Empty>{section === "Display" ? "No stock items. The admin can tick Count in stock on menu items." : "No items here yet. The admin adds them under More, Raw items."}</Empty>}
 
-        <ul className="divide-y divide-line">
+        <ul className="grid gap-3 md:grid-cols-2">
           {shown.map((it) => {
             const f = figures(it.name, it.price);
             return (
-              <li key={it.name} className="py-3">
+              <li key={it.name} className="rounded-xl border border-line p-3 bg-white">
                 <div className="mb-2 flex items-baseline justify-between gap-2">
                   <span className="truncate font-bold">{it.name}</span>
                   <span className="text-xs text-muted">{it.unit ?? ""}{it.price > 0 ? ` · ${formatMoney(it.price)}` : ""}</span>
@@ -177,7 +174,7 @@ function Sheet({ section }: { section: Section }) {
                   <Cell label="Sold" value={f.sold === null ? "pending" : String(f.sold)} bad={f.sold !== null && f.sold < 0} />
                   <Cell label="Amount" value={f.amount === null ? (f.sold === null ? "pending" : "") : formatMoney(f.amount)} />
                 </div>
-                {f.out > 0 && <div className="mt-1 text-xs text-muted">Already taken out (transfers and wastage): {f.out}</div>}
+                {f.out > 0 && <div className="mt-1 text-xs text-muted">Already taken out: {f.out}</div>}
               </li>
             );
           })}

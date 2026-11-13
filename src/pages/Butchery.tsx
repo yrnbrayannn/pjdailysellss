@@ -1,5 +1,4 @@
-// Butchery is sold by amount ("500 worth of beef"): the waiter enters Kgs and Amount,
-// the app works out the price per kg and warns if it is far from the list price.
+// Butchery is sold by amount, responsive for desktop.
 import { useState } from "react";
 import { deleteRow, formatMoney, formatTime, insertRow, rawPrice } from "../lib/api";
 import { round2 } from "../lib/money";
@@ -8,7 +7,7 @@ import type { ButcherySale } from "../lib/types";
 import { Badge, Button, Card, Empty, ErrorBox, Field, Flash, Segmented, Title, inputCls, useFlash } from "../components/ui";
 
 const METHODS = ["Cash", "M-Pesa", "Unpaid"] as const;
-const TOLERANCE = 0.1; // more than 10 percent away from the list price is flagged
+const TOLERANCE = 0.1;
 
 export default function Butchery() {
   const { date, shift } = useApp();
@@ -56,7 +55,7 @@ export default function Butchery() {
   const listTotal = sales.rows.reduce((s, r) => s + Number(r.cost_kshs), 0);
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-4 items-start lg:grid-cols-2">
       <Card className="grid gap-4">
         <Title>Butchery sale</Title>
         {raw.error && <ErrorBox>{raw.error}</ErrorBox>}
@@ -79,7 +78,7 @@ export default function Butchery() {
         </div>
         {priceFlag && (
           <p className="rounded-xl bg-warn-soft p-3 text-center text-sm font-bold text-amber-800">
-            This is {Math.round(off * 100)}% {perKg > listPrice ? "above" : "below"} the list price. Check the weight and the amount. You can still save; the sale will be marked CHECK PRICE.
+            This is {Math.round(off * 100)}% {perKg > listPrice ? "above" : "below"} the list price. Check the weight and the amount.
           </p>
         )}
 

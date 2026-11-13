@@ -1,5 +1,4 @@
 // Cashier and admin: the shift handover.
-// Admin also gets stock checks (display, store, butchery), sales of "other" items and reported issues.
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { formatMoney, insertRow, rawPrice, updateRows } from "../lib/api";
@@ -21,7 +20,6 @@ export default function Dashboard() {
   const isAdmin = role === "admin";
   const { msg, flash } = useFlash();
 
-  // Cashier and admin read these three. The rest is admin only (the database hides it from the cashier anyway).
   const hotel = useShiftRows<HotelSale>("hotel_sales", "sale_date");
   const meat = useShiftRows<ButcherySale>("butchery_sales", "sale_date");
   const exp = useShiftRows<Expense>("expenses", "expense_date");
@@ -41,11 +39,10 @@ export default function Dashboard() {
   const h = summarize(hotel.rows, meat.rows, exp.rows);
   const unpaidOrders = new Set(hotel.rows.filter((r) => r.payment_method === "Unpaid" || r.check_status === "UNPAID").map((r) => r.order_ref ?? r.id)).size;
 
-  // ---- one reconciliation per section ----
-  const display = useMemo(() => build("Display", menu.filter((m) => m.track_stock).map((m) => ({ name: m.item_name, unit: m.unit_type, price: Number(m.selling_price) || 0 })), hotel.rows), [menu, takes.rows, adds.rows, moves.rows, waste.rows, hotel.rows, limit]); // eslint-disable-line react-hooks/exhaustive-deps
+  const display = useMemo(() => build("Display", menu.filter((m) => m.track_stock).map((m) => ({ name: m.item_name, unit: m.unit_type, price: Number(m.selling_price) || 0 })), hotel.rows), [menu, takes.rows, adds.rows, moves.rows, waste.rows, hotel.rows, limit]);
   const butchery = useMemo(() => build("Butchery", rawMeat.items.map((r) => ({ name: r.item_name, unit: r.unit_type, price: rawPrice(r, rawMeat.priceKey) })),
-    meat.rows.map((m) => ({ food_item: m.meat_item, quantity: m.quantity_kg, total_cost: m.cost_kshs }))), [rawMeat.items, rawMeat.priceKey, takes.rows, adds.rows, moves.rows, waste.rows, meat.rows, limit]); // eslint-disable-line react-hooks/exhaustive-deps
-  const store = useMemo(() => build("Store", rawStore.items.map((r) => ({ name: r.item_name, unit: r.unit_type, price: 0 })), []), [rawStore.items, takes.rows, adds.rows, moves.rows, waste.rows, limit]); // eslint-disable-line react-hooks/exhaustive-deps
+    meat.rows.map((m) => ({ food_item: m.meat_item, quantity: m.quantity_kg, total_cost: m.cost_kshs }))), [rawMeat.items, rawMeat.priceKey, takes.rows, adds.rows, moves.rows, waste.rows, meat.rows, limit]);
+  const store = useMemo(() => build("Store", rawStore.items.map((r) => ({ name: r.item_name, unit: r.unit_type, price: 0 })), []), [rawStore.items, takes.rows, adds.rows, moves.rows, waste.rows, limit]);
 
   function build(section: Section, items: StockItemRef[], sales: SaleLine[]) {
     const mine = takes.rows.filter((t) => t.section === section);
@@ -77,7 +74,6 @@ export default function Dashboard() {
     localStorage.setItem("pj-threshold", v);
   }
 
-  /** Investigate / Approve a flagged row (creates the record if staff did not report it). */
   async function reviewRow(row: ReconRow, status: Status) {
     const stamp = { status, reviewed_by: userId, reviewed_at: new Date().toISOString() };
     const existing = issues.rows.filter((d) => d.item_name === row.item);
@@ -101,44 +97,48 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="grid gap-4">
-      {errors.length > 0 && <ErrorBox>{String(errors[0])}</ErrorBox>}
+    <div className="grid gap-4 items-start lg:grid-cols-3">
+      {errors.length > 0 && <div className="lg:col-span-3"><ErrorBox>{String(errors[0])}</ErrorBox></div>}
 
-      {/* ---- Cashier handover (cashier and admin) ---- */}
-      <Card>
-        <Title hint={`${date} · ${shift}`}>Cashier handover</Title>
-        <div className="divide-y divide-line">
-          <StatRow label="Total Sales" value={formatMoney(h.totalSales)} note={`Hotel ${formatMoney(h.hotel.sales)} · Butchery ${formatMoney(h.butchery.sales)}`} />
-          <StatRow label="Total Cash" value={formatMoney(h.totalCash)} />
-          <StatRow label="Total M-Pesa" value={formatMoney(h.totalMpesa)} />
-          <StatRow label="Total Unpaid" value={formatMoney(h.totalUnpaid)} note={unpaidOrders ? `${unpaidOrders} unpaid hotel order${unpaidOrders > 1 ? "s" : ""}` : undefined} />
-          <StatRow label="Total Expenses" value={formatMoney(h.totalExpenses)} note={`Paid from cash (deducted): ${formatMoney(h.cashExpenses)}`} />
-        </div>
-        <div className="mt-3 rounded-xl bg-brand p-4 text-white">
-          <StatRow big label="Cash to Hand Over" value={formatMoney(h.cashToHandOver)} note="Total cash − cash expenses" />
-        </div>
-        {unpaidOrders > 0 && (
-          <Link to="/orders" className="mt-3 block rounded-xl bg-warn-soft p-3 text-center font-bold text-amber-800">
-            {unpaidOrders} unpaid order{unpaidOrders > 1 ? "s" : ""}. Open Orders to mark them paid.
-          </Link>
-        )}
-        {h.mismatch && <ErrorBox>Some sales do not add up (cash + M-Pesa + unpaid ≠ total). Check the order lists.</ErrorBox>}
-      </Card>
+      {/* ---- Cashier handover ---- */}
+      <div className="lg:col-span-1">
+        <Card>
+          <Title hint={`${date} · ${shift}`}>Cashier handover</Title>
+          <div className="divide-y divide-line">
+            <StatRow label="Total Sales" value={formatMoney(h.totalSales)} note={`Hotel ${formatMoney(h.hotel.sales)} · Butchery ${formatMoney(h.butchery.sales)}`} />
+            <StatRow label="Total Cash" value={formatMoney(h.totalCash)} />
+            <StatRow label="Total M-Pesa" value={formatMoney(h.totalMpesa)} />
+            <StatRow label="Total Unpaid" value={formatMoney(h.totalUnpaid)} note={unpaidOrders ? `${unpaidOrders} unpaid hotel order${unpaidOrders > 1 ? "s" : ""}` : undefined} />
+            <StatRow label="Total Expenses" value={formatMoney(h.totalExpenses)} note={`Paid from cash (deducted): ${formatMoney(h.cashExpenses)}`} />
+          </div>
+          <div className="mt-3 rounded-xl bg-brand p-4 text-white">
+            <StatRow big label="Cash to Hand Over" value={formatMoney(h.cashToHandOver)} note="Total cash − cash expenses" />
+          </div>
+          {unpaidOrders > 0 && (
+            <Link to="/orders" className="mt-3 block rounded-xl bg-warn-soft p-3 text-center font-bold text-amber-800">
+              {unpaidOrders} unpaid order{unpaidOrders > 1 ? "s" : ""}. Open Orders to mark them paid.
+            </Link>
+          )}
+          {h.mismatch && <ErrorBox>Some sales do not add up (cash + M-Pesa + unpaid ≠ total). Check the order lists.</ErrorBox>}
+        </Card>
+      </div>
 
+      {/* ---- Admin Extras ---- */}
       {isAdmin && (
-        <>
-          <div className="grid grid-cols-[1fr_8rem] items-center gap-3 px-1">
-            <span className="text-sm text-muted">Flag a stock gap bigger than (KSh)</span>
-            <input className={`${inputCls} !h-12 text-center`} inputMode="decimal" value={threshold} onChange={(e) => changeThreshold(e.target.value)} />
+        <div className="grid gap-4 lg:col-span-2 lg:grid-cols-2">
+          <div className="lg:col-span-2">
+            <div className="flex items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm border border-line">
+              <span className="text-sm font-bold text-muted">Flag a stock gap bigger than (KSh)</span>
+              <input className={`${inputCls} !h-10 w-24 text-center font-bold`} inputMode="decimal" value={threshold} onChange={(e) => changeThreshold(e.target.value)} />
+            </div>
           </div>
 
-          <ReconCard title="Display stock check" result={display} unitLabel="" onReview={reviewRow} issues={issues.rows} emptyText="No closed display count for this shift yet." />
-          <ReconCard title="Butchery stock check" result={butchery} unitLabel="kg" onReview={reviewRow} issues={issues.rows} emptyText="No closed butchery count for this shift yet." />
+          <ReconCard title="Display stock check" result={display} unitLabel="" onReview={reviewRow} issues={issues.rows} emptyText="No closed display count yet." />
+          <ReconCard title="Butchery stock check" result={butchery} unitLabel="kg" onReview={reviewRow} issues={issues.rows} emptyText="No closed butchery count yet." />
 
-          {/* ---- Store: only what was used (raw items have no selling price) ---- */}
           <Card>
             <Title hint={store.pending ? `${store.pending} not closed` : undefined}>Store check</Title>
-            {store.rows.length === 0 ? <Empty>No closed store count for this shift yet.</Empty> : (
+            {store.rows.length === 0 ? <Empty>No closed store count for this shift.</Empty> : (
               <ul className="divide-y divide-line">
                 {store.rows.map((r) => (
                   <li key={r.item} className="py-2">
@@ -150,59 +150,47 @@ export default function Dashboard() {
             )}
           </Card>
 
-          {/* ---- Items sold that are not on the menu ---- */}
           <Card>
-            <Title hint={others.length ? `${others.length} item${others.length > 1 ? "s" : ""}` : undefined}>Other items sold</Title>
-            {others.length === 0 ? <Empty>Nothing outside the menu was sold this shift.</Empty> : (
-              <>
-                <p className="mb-2 text-sm text-muted">These are not on the menu and are not in stock matching. If one sells often, add it on the Menu page.</p>
-                <ul className="divide-y divide-line">
-                  {others.map((o) => (
-                    <li key={o.name} className="flex justify-between py-2 font-semibold"><span>{o.qty} × {o.name}</span><span className="tabular-nums">{formatMoney(o.amount)}</span></li>
-                  ))}
-                </ul>
-              </>
+            <Title hint={others.length ? `${others.length}` : undefined}>Other items sold</Title>
+            {others.length === 0 ? <Empty>Nothing outside the menu was sold.</Empty> : (
+              <ul className="divide-y divide-line">
+                {others.map((o) => (
+                  <li key={o.name} className="flex justify-between py-2 font-semibold"><span>{o.qty} × {o.name}</span><span className="tabular-nums">{formatMoney(o.amount)}</span></li>
+                ))}
+              </ul>
             )}
           </Card>
 
-          {/* ---- Reported issues ---- */}
-          <Card>
-            <Title hint={`${issues.rows.length}`}>Reported issues</Title>
-            {issues.rows.length === 0 && <Empty>No issues for this shift.</Empty>}
-            <ul className="divide-y divide-line">
-              {issues.rows.map((d) => (
-                <li key={d.id} className="py-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold">{d.item_name}</span>
-                    <span className="flex items-center gap-2"><span className="font-bold tabular-nums">{formatMoney(d.amount)}</span><Badge tone={tone(d.status)}>{d.status}</Badge></span>
-                  </div>
-                  <div className="text-sm text-muted">{d.note ?? ""}</div>
-                  <ReceiptLink path={d.receipt_url} />
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <Button small variant="outline" onClick={() => void reviewIssue(d, "Investigate")}>Investigate</Button>
-                    <Button small onClick={() => void reviewIssue(d, "Approved")}>Approve</Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </>
+          <div className="lg:col-span-2">
+            <Card>
+              <Title hint={`${issues.rows.length}`}>Reported issues</Title>
+              {issues.rows.length === 0 && <Empty>No issues for this shift.</Empty>}
+              <ul className="grid gap-3 md:grid-cols-2">
+                {issues.rows.map((d) => (
+                  <li key={d.id} className="rounded-xl border border-line p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold">{d.item_name}</span>
+                      <span className="flex items-center gap-2"><span className="font-bold tabular-nums">{formatMoney(d.amount)}</span><Badge tone={tone(d.status)}>{d.status}</Badge></span>
+                    </div>
+                    <div className="text-sm text-muted">{d.note ?? ""}</div>
+                    <ReceiptLink path={d.receipt_url} />
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      <Button small variant="outline" onClick={() => void reviewIssue(d, "Investigate")}>Investigate</Button>
+                      <Button small onClick={() => void reviewIssue(d, "Approved")}>Approve</Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </div>
+        </div>
       )}
       <Flash msg={msg} />
     </div>
   );
 }
 
-function ReconCard({
-  title, result, unitLabel, onReview, issues, emptyText,
-}: {
-  title: string;
-  result: { rows: ReconRow[]; pending: number };
-  unitLabel: string;
-  onReview: (r: ReconRow, s: Status) => Promise<void>;
-  issues: Discrepancy[];
-  emptyText: string;
-}) {
+function ReconCard({ title, result, unitLabel, onReview, issues, emptyText }: { title: string; result: { rows: ReconRow[]; pending: number }; unitLabel: string; onReview: (r: ReconRow, s: Status) => Promise<void>; issues: Discrepancy[]; emptyText: string; }) {
   const { rows, pending } = result;
   const flagged = rows.filter((r) => r.flagged);
   const fine = rows.filter((r) => !r.flagged);
@@ -259,9 +247,7 @@ function Detail({ r, unitLabel = "", showMoney = true }: { r: ReconRow; unitLabe
   const u = r.unit && !unitLabel ? ` ${r.unit}` : unitLabel ? ` ${unitLabel}` : "";
   return (
     <div className="mt-1 text-sm text-muted">
-      <div>
-        Opening {r.opening} + added {r.added + r.transferredIn} − out {r.transferredOut} − wasted {r.wasted} − closing {r.closing} = <b>{r.unitsUsed}{u} used</b>
-      </div>
+      <div>Opening {r.opening} + added {r.added + r.transferredIn} − out {r.transferredOut} − wasted {r.wasted} − closing {r.closing} = <b>{r.unitsUsed}{u} used</b></div>
       {showMoney && (
         <>
           <div>Sold in orders: <b>{r.unitsSold}{u}</b>{r.unitsGap !== 0 ? ` (${r.unitsGap > 0 ? "short " : "extra "}${Math.abs(r.unitsGap)}${u})` : ""}</div>

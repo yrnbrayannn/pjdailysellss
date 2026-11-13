@@ -1,4 +1,4 @@
-// App shell: login check, role check, header (date + shift), bottom navigation.
+// App shell: login check, role check, header (date + shift), responsive navigation.
 import { useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
@@ -13,7 +13,6 @@ const STOCK = { to: "/stock", icon: "📦", label: "Stock" };
 const EXPENSES = { to: "/expenses", icon: "💸", label: "Expenses" };
 const MORE = { to: "/more", icon: "⋯", label: "More" };
 
-/** Bottom navigation per role. Keep it to 5 buttons so it stays easy to tap. */
 const NAV: Record<Role, { to: string; icon: string; label: string }[]> = {
   admin: [{ to: "/dashboard", icon: "📊", label: "Dashboard" }, ORDERS, BUTCHERY, STOCK, MORE],
   cashier: [{ to: "/dashboard", icon: "📊", label: "Handover" }, ORDERS, BUTCHERY, STOCK, MORE],
@@ -30,14 +29,12 @@ export default function Layout() {
   const [date, setDate] = useState(localDate());
   const [shift, setShift] = useState<Shift>(guessShift());
 
-  // 1. who is logged in?
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
     return () => data.subscription.unsubscribe();
   }, []);
 
-  // 2. what is their role? (profiles.role = admin, cashier, butcher or staff)
   const userId = session?.user.id;
   useEffect(() => {
     if (!userId) { setRole(null); return; }
@@ -57,54 +54,90 @@ export default function Layout() {
   const nav = NAV[role];
 
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-20 bg-brand px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] text-white shadow">
-        <div className="mx-auto max-w-2xl">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-lg font-extrabold">PJ's Stock &amp; Sales</span>
-            <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-bold uppercase">{role}</span>
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      {/* Desktop Sidebar */}
+      <aside className="hidden w-64 flex-col border-r border-line bg-white md:flex">
+        <div className="flex h-16 items-center border-b border-line px-6">
+          <span className="text-xl font-extrabold text-brand">PJ's Stock & Sales</span>
+        </div>
+        <nav className="flex-1 space-y-2 overflow-y-auto p-4">
+          {nav.map((n) => (
+            <NavLink
+              key={n.to} to={n.to}
+              className={({ isActive }) =>
+                `flex items-center gap-3 rounded-xl px-4 py-3 font-bold transition-colors ${
+                  isActive ? "bg-brand-soft text-brand" : "text-muted hover:bg-gray-100 hover:text-ink"
+                }`
+              }
+            >
+              <span className="text-xl leading-none">{n.icon}</span>
+              {n.label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="border-t border-line p-4">
+          <div className="mb-3 px-2">
+            <div className="text-xs font-bold uppercase text-muted">{role}</div>
+            <div className="truncate text-sm font-semibold">{session.user.email}</div>
           </div>
-          <div className="grid grid-cols-[1fr_auto] gap-2">
+          <button onClick={() => void supabase.auth.signOut()} className="w-full rounded-lg bg-danger-soft py-2 font-bold text-danger hover:bg-red-200">
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Top Header (Date + Shift) */}
+        <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4 border-b border-line bg-white px-4 py-3 md:px-6">
+          <div className="flex items-center gap-2 md:hidden">
+            <span className="text-lg font-extrabold text-brand">PJ's</span>
+          </div>
+          <div className="flex flex-1 items-center justify-end gap-2 md:gap-4">
             <input
               type="date" value={date} aria-label="Date"
               onChange={(e) => e.target.value && setDate(e.target.value)}
-              className="h-12 min-w-0 rounded-xl bg-white px-3 text-lg font-semibold text-ink"
+              className="h-10 min-w-0 rounded-xl border-2 border-line bg-white px-3 text-base font-semibold text-ink"
             />
-            <div className="grid grid-cols-2 gap-1 rounded-xl bg-white/15 p-1">
+            <div className="flex gap-1 rounded-xl bg-gray-100 p-1">
               {(["Day", "Night"] as const).map((s) => (
                 <button
                   key={s} type="button" onClick={() => setShift(s)}
-                  className={`h-10 rounded-lg px-4 font-bold ${s === shift ? "bg-white text-brand" : "text-white"}`}
+                  className={`h-8 rounded-lg px-4 text-sm font-bold transition-colors ${s === shift ? "bg-white text-brand shadow-sm" : "text-muted hover:text-ink"}`}
                 >
                   {s}
                 </button>
               ))}
             </div>
+            <span className="hidden rounded-full bg-brand-soft px-3 py-1 text-xs font-bold uppercase text-brand md:inline-block">{role}</span>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main className="mx-auto max-w-2xl px-4 pb-32 pt-4">
-        {setupError && <ErrorBox>{setupError}</ErrorBox>}
-        {/* key makes every page reload cleanly when the date or shift changes */}
-        <Outlet context={ctx} key={`${date}-${shift}`} />
-      </main>
+        {/* Scrollable Main Content */}
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+          <div className="mx-auto max-w-7xl">
+            {setupError && <ErrorBox>{setupError}</ErrorBox>}
+            <Outlet context={ctx} key={`${date}-${shift}`} />
+          </div>
+        </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-white pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto grid max-w-2xl" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>
-          {nav.map((n) => (
-            <NavLink
-              key={n.to} to={n.to}
-              className={({ isActive }) =>
-                `flex h-16 flex-col items-center justify-center text-xs font-bold ${isActive ? "text-brand" : "text-muted"}`
-              }
-            >
-              <span className="text-2xl leading-none">{n.icon}</span>
-              {n.label}
-            </NavLink>
-          ))}
-        </div>
-      </nav>
+        {/* Mobile Bottom Navigation */}
+        <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
+          <div className="mx-auto grid max-w-2xl" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>
+            {nav.map((n) => (
+              <NavLink
+                key={n.to} to={n.to}
+                className={({ isActive }) =>
+                  `flex h-16 flex-col items-center justify-center text-xs font-bold ${isActive ? "text-brand" : "text-muted"}`
+                }
+              >
+                <span className="text-2xl leading-none">{n.icon}</span>
+                {n.label}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+      </div>
     </div>
   );
 }
