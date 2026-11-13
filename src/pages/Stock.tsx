@@ -1,16 +1,21 @@
-// Stock: closing count + deliveries, transfers, wastage and discrepancy reports.
-import { useEffect, useState } from "react";
-import { addDays, getAll, supabase } from "../lib/api";
-import { useApp, useMenu } from "../lib/useApp";
-import type { StockTake, Supplier } from "../lib/types";
-import { Button, Card, Empty, ErrorBox, Flash, Title, inputCls, useFlash } from "../components/ui";
+// Stock: the daily stock sheet (opening, added, total, closing, sold, amount) per section,
+// plus deliveries, transfers, wastage and issue reports.
+import { useEffect, useMemo, useState } from "react";
+import { addDays, formatMoney, getAll, supabase } from "../lib/api";
+import { round2 } from "../lib/money";
+import { SECTIONS_FOR, useApp, useShiftRows, useStockItems } from "../lib/useApp";
+import type { Section, StockAddition, StockTake, StockTransfer, Supplier, Wastage } from "../lib/types";
+import { Button, Card, Empty, ErrorBox, Flash, Segmented, Title, inputCls, useFlash } from "../components/ui";
 import { IssueForm, Movement } from "../components/StockForms";
 
-const TABS = ["Count", "Delivery", "Transfer", "Wastage", "Issue"] as const;
+const TABS = ["Sheet", "Delivery", "Transfer", "Wastage", "Issue"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function Stock() {
-  const [tab, setTab] = useState<Tab>("Count");
+  const { role } = useApp();
+  const allowed = SECTIONS_FOR[role];
+  const [tab, setTab] = useState<Tab>("Sheet");
+  const [section, setSection] = useState<Section>(allowed[0]!);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   useEffect(() => { getAll<Supplier>("suppliers", "name").then(setSuppliers).catch(() => setSuppliers([])); }, []);
 
@@ -26,20 +31,30 @@ export default function Stock() {
           </button>
         ))}
       </div>
-      {tab === "Count" && <Count />}
-      {tab === "Delivery" && <Movement key="delivery" kind="delivery" suppliers={suppliers} />}
-      {tab === "Transfer" && <Movement key="transfer" kind="transfer" suppliers={suppliers} />}
-      {tab === "Wastage" && <Movement key="wastage" kind="wastage" suppliers={suppliers} />}
+
+      {tab !== "Issue" && allowed.length > 1 && <Segmented options={allowed} value={section} onChange={setSection} />}
+
+      {tab === "Sheet" && <Sheet key={section} section={section} />}
+      {tab === "Delivery" && <Movement key={`d-${section}`} kind="delivery" section={section} suppliers={suppliers} />}
+      {tab === "Transfer" && <Movement key={`t-${section}`} kind="transfer" section={section} suppliers={suppliers} />}
+      {tab === "Wastage" && <Movement key={`w-${section}`} kind="wastage" section={section} suppliers={suppliers} />}
       {tab === "Issue" && <IssueForm />}
     </div>
   );
 }
 
 type Vals = Record<string, { opening: string; closing: string }>;
+const order = (d: string, s: string) => `${d}${s === "Night" ? 1 : 0}`;
+const num = (v: string) => (v === "" ? null : Number(v));
+const sum = (rows: { item_name: string; quantity: number }[], name: string) =>
+  rows.filter((r) => r.item_name === name).reduce((s, r) => s + (Number(r.quantity) || 0), 0);
 
-function Count() {
+function Sheet({ section }: { section: Section }) {
   const { date, shift } = useApp();
-  const menu = useMenu(true);
+  const stock = useStockItems(section);
+  const adds = useShiftRows<StockAddition>("stock_additions", "entry_date");
+  const moves = useShiftRows<StockTransfer>("stock_transfers", "entry_date");
+  const waste = useShiftRows<Wastage>("wastage", "entry_date");
   const [takes, setTakes] = useState<StockTake[]>([]);
   const [vals, setVals] = useState<Vals>({});
   const [filter, setFilter] = useState("");
@@ -48,90 +63,144 @@ function Count() {
   const [tick, setTick] = useState(0);
   const { msg, flash } = useFlash();
 
-  // Counts of the last 8 days (so we can pre-fill today's opening from the last closing)
+  // Counts of the last 8 days of this section (to pre-fill opening from the last closing)
   useEffect(() => {
     let ignore = false;
-    void supabase.from("stock_takes").select("*").gte("stock_date", addDays(date, -8)).lte("stock_date", date)
+    void supabase.from("stock_takes").select("*").eq("section", section)
+      .gte("stock_date", addDays(date, -8)).lte("stock_date", date)
       .then(({ data, error }) => {
         if (ignore) return;
         if (error) setError(error.message);
         else { setTakes((data ?? []) as StockTake[]); setError(null); }
       });
     return () => { ignore = true; };
-  }, [date, tick]);
+  }, [date, section, tick]);
+
+  const today = useMemo(() => takes.filter((t) => t.stock_date === date && t.shift === shift), [takes, date, shift]);
 
   useEffect(() => {
-    const order = (d: string, s: string) => `${d}${s === "Night" ? 1 : 0}`;
     const now = order(date, shift);
     const next: Vals = {};
-    for (const m of menu.items) {
-      const mine = takes.find((t) => t.item_name === m.item_name && t.stock_date === date && t.shift === shift);
-      if (mine) { next[m.item_name] = { opening: String(mine.opening_qty), closing: String(mine.closing_qty) }; continue; }
+    for (const it of stock.items) {
+      const mine = today.find((t) => t.item_name === it.name);
+      if (mine) { next[it.name] = { opening: String(mine.opening_qty ?? ""), closing: mine.closing_qty === null || mine.closing_qty === undefined ? "" : String(mine.closing_qty) }; continue; }
       const prev = takes
-        .filter((t) => t.item_name === m.item_name && order(t.stock_date, t.shift) < now)
+        .filter((t) => t.item_name === it.name && t.closing_qty !== null && t.closing_qty !== undefined && order(t.stock_date, t.shift) < now)
         .sort((a, b) => order(b.stock_date, b.shift).localeCompare(order(a.stock_date, a.shift)))[0];
-      next[m.item_name] = { opening: prev ? String(prev.closing_qty) : "", closing: "" };
+      next[it.name] = { opening: prev ? String(prev.closing_qty) : "", closing: "" };
     }
     setVals(next);
-  }, [menu.items, takes, date, shift]);
+  }, [stock.items, takes, today, date, shift]);
 
   function set(name: string, field: "opening" | "closing", value: string) {
     setVals((v) => ({ ...v, [name]: { ...(v[name] ?? { opening: "", closing: "" }), [field]: value } }));
   }
 
-  const counted = menu.items.filter((m) => (vals[m.item_name]?.closing ?? "") !== "").length;
+  // Everything the sheet shows is worked out here, live, from what is typed.
+  const figures = (name: string, price: number) => {
+    const v = vals[name] ?? { opening: "", closing: "" };
+    const opening = num(v.opening);
+    const closing = num(v.closing);
+    const added = sum(adds.rows.filter((r) => r.section === section), name) + sum(moves.rows.filter((r) => r.section === section && r.direction === "In"), name);
+    const out = sum(moves.rows.filter((r) => r.section === section && r.direction === "Out"), name) + sum(waste.rows.filter((r) => r.section === section), name);
+    const total = opening === null ? null : round2(opening + added);
+    const sold = total === null || closing === null ? null : round2(total - out - closing);
+    const amount = sold === null || price <= 0 ? null : round2(sold * price);
+    return { opening, closing, added, out, total, sold, amount };
+  };
+
+  const counted = stock.items.filter((it) => (vals[it.name]?.closing ?? "") !== "").length;
+  const grand = round2(stock.items.reduce((s, it) => s + (figures(it.name, it.price).amount ?? 0), 0));
 
   async function save() {
-    const rows = [];
-    for (const m of menu.items) {
-      const v = vals[m.item_name];
-      if (!v || v.closing === "") continue;
-      const opening = Number(v.opening), closing = Number(v.closing);
-      if (v.opening === "" || !Number.isFinite(opening) || opening < 0) return flash(`Enter the opening count for ${m.item_name}`, true);
-      if (!Number.isFinite(closing) || closing < 0) return flash(`Check the closing count for ${m.item_name}`, true);
-      rows.push({ stock_date: date, shift, item_name: m.item_name, opening_qty: opening, closing_qty: closing });
+    const inserts: object[] = [];
+    const updates: { id: string; patch: object }[] = [];
+    for (const it of stock.items) {
+      const v = vals[it.name];
+      if (!v || (v.opening === "" && v.closing === "")) continue;
+      const opening = Number(v.opening);
+      if (v.opening === "" || !Number.isFinite(opening) || opening < 0) return flash(`Enter the opening count for ${it.name}`, true);
+      if (v.closing !== "" && (!Number.isFinite(Number(v.closing)) || Number(v.closing) < 0)) return flash(`Check the closing count for ${it.name}`, true);
+      const closing = v.closing === "" ? null : Number(v.closing);
+      const existing = today.find((t) => t.item_name === it.name);
+      if (existing) updates.push({ id: existing.id, patch: { opening_qty: opening, closing_qty: closing } });
+      else inserts.push({ stock_date: date, shift, section, item_name: it.name, opening_qty: opening, closing_qty: closing });
     }
-    if (rows.length === 0) return flash("Enter at least one closing count", true);
+    if (inserts.length + updates.length === 0) return flash("Enter at least one count", true);
     setSaving(true);
-    const { error } = await supabase.from("stock_takes").upsert(rows, { onConflict: "stock_date,shift,item_name" });
+    let failure: string | null = null;
+    if (inserts.length) {
+      const { error } = await supabase.from("stock_takes").insert(inserts);
+      if (error) failure = error.message;
+    }
+    for (const u of updates) {
+      const { error } = await supabase.from("stock_takes").update(u.patch).eq("id", u.id);
+      if (error) failure = error.message;
+    }
     setSaving(false);
-    if (error) return flash(error.message, true);
-    flash(`Saved ${rows.length} counts`);
+    if (failure) return flash(failure, true);
+    flash(`Saved ${inserts.length + updates.length} items`);
     setTick((t) => t + 1);
   }
 
-  const shown = menu.items.filter((m) => m.item_name.toLowerCase().includes(filter.toLowerCase()));
+  const shown = stock.items.filter((it) => it.name.toLowerCase().includes(filter.toLowerCase()));
 
   return (
     <>
       <Card className="grid gap-3">
-        <Title hint={`${counted} of ${menu.items.length} counted`}>Closing stock count</Title>
-        {(error || menu.error) && <ErrorBox>{error ?? menu.error}</ErrorBox>}
-        <input className={inputCls} placeholder="Search items…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        {menu.items.length === 0 && <Empty>No stock items. The admin can tick “Count in stock” on menu items.</Empty>}
+        <Title hint={`${counted} of ${stock.items.length} closed`}>{section} stock sheet</Title>
+        {(error || stock.error || adds.error) && <ErrorBox>{error ?? stock.error ?? adds.error}</ErrorBox>}
+        <p className="text-sm text-muted">Fill Opening at the start of the shift and Closing at the end. You can save now and add Closing later.</p>
+        <input className={inputCls} placeholder="Search items" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        {stock.items.length === 0 && <Empty>{section === "Display" ? "No stock items. The admin can tick Count in stock on menu items." : "No items here yet. The admin adds them under More, Raw items."}</Empty>}
+
         <ul className="divide-y divide-line">
-          {shown.map((m) => (
-            <li key={m.id} className="flex items-end gap-2 py-3">
-              <div className="min-w-0 flex-1 pb-3">
-                <div className="truncate font-bold">{m.item_name}</div>
-                <div className="text-xs text-muted">{m.unit_type ?? m.category}</div>
-              </div>
-              <label className="w-20">
-                <span className="text-[11px] font-semibold text-muted">Opening</span>
-                <input className="h-12 w-full rounded-lg border-2 border-line px-2 text-center text-lg" inputMode="decimal"
-                  value={vals[m.item_name]?.opening ?? ""} onChange={(e) => set(m.item_name, "opening", e.target.value)} />
-              </label>
-              <label className="w-28">
-                <span className="text-[11px] font-semibold text-muted">Closing</span>
-                <input className="h-14 w-full rounded-lg border-2 border-brand px-2 text-center text-2xl font-bold" inputMode="decimal" placeholder="—"
-                  value={vals[m.item_name]?.closing ?? ""} onChange={(e) => set(m.item_name, "closing", e.target.value)} />
-              </label>
-            </li>
-          ))}
+          {shown.map((it) => {
+            const f = figures(it.name, it.price);
+            return (
+              <li key={it.name} className="py-3">
+                <div className="mb-2 flex items-baseline justify-between gap-2">
+                  <span className="truncate font-bold">{it.name}</span>
+                  <span className="text-xs text-muted">{it.unit ?? ""}{it.price > 0 ? ` · ${formatMoney(it.price)}` : ""}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <label>
+                    <span className="text-[11px] font-semibold text-muted">Opening</span>
+                    <input className="h-12 w-full rounded-lg border-2 border-line px-2 text-center text-lg" inputMode="decimal" value={vals[it.name]?.opening ?? ""} onChange={(e) => set(it.name, "opening", e.target.value)} />
+                  </label>
+                  <Cell label="Added" value={f.added ? String(f.added) : "0"} />
+                  <Cell label="Total" value={f.total === null ? "" : String(f.total)} />
+                  <label>
+                    <span className="text-[11px] font-semibold text-muted">Closing</span>
+                    <input className="h-12 w-full rounded-lg border-2 border-brand px-2 text-center text-lg font-bold" inputMode="decimal" placeholder="later" value={vals[it.name]?.closing ?? ""} onChange={(e) => set(it.name, "closing", e.target.value)} />
+                  </label>
+                  <Cell label="Sold" value={f.sold === null ? "pending" : String(f.sold)} bad={f.sold !== null && f.sold < 0} />
+                  <Cell label="Amount" value={f.amount === null ? (f.sold === null ? "pending" : "") : formatMoney(f.amount)} />
+                </div>
+                {f.out > 0 && <div className="mt-1 text-xs text-muted">Already taken out (transfers and wastage): {f.out}</div>}
+              </li>
+            );
+          })}
         </ul>
-        <Button disabled={saving || menu.items.length === 0} onClick={() => void save()}>{saving ? "Saving…" : "Save counts"}</Button>
+
+        {grand > 0 && (
+          <div className="rounded-xl bg-brand p-3 text-center text-white">
+            <div className="text-sm opacity-80">Total amount from stock sold</div>
+            <div className="text-2xl font-extrabold tabular-nums">{formatMoney(grand)}</div>
+          </div>
+        )}
+        <Button disabled={saving || stock.items.length === 0} onClick={() => void save()}>{saving ? "Saving…" : "Save sheet"}</Button>
       </Card>
       <Flash msg={msg} />
     </>
+  );
+}
+
+function Cell({ label, value, bad = false }: { label: string; value: string; bad?: boolean }) {
+  return (
+    <div>
+      <span className="text-[11px] font-semibold text-muted">{label}</span>
+      <div className={`flex h-12 items-center justify-center rounded-lg bg-brand-soft px-1 text-center text-base font-bold tabular-nums ${bad ? "text-danger" : ""}`}>{value}</div>
+    </div>
   );
 }

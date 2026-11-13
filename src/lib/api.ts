@@ -100,3 +100,18 @@ export function formatMoney(n: number): string {
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" });
 }
+
+// ---------- raw items (Store and Butchery) ----------
+/** Finds which column of raw_items holds the list price (for example Beef = 800). Looks at real rows. */
+export function rawPriceKey(rows: { [k: string]: unknown }[]): string {
+  const skip = new Set(["sort_order"]);
+  for (const r of rows) {
+    for (const [k, v] of Object.entries(r)) if (typeof v === "number" && !skip.has(k)) return k;
+  }
+  return ""; // not found: pages then hide the price field instead of guessing a column name
+}
+
+export function rawPrice(row: { [k: string]: unknown }, key: string): number {
+  const v = key ? row[key] : undefined;
+  return typeof v === "number" ? v : 0;
+}

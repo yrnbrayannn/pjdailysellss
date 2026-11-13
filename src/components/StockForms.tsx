@@ -1,8 +1,8 @@
 // Deliveries, transfers, wastage (one small form each) and the discrepancy report.
 import { useState } from "react";
 import { deleteRow, formatMoney, formatTime, insertRow } from "../lib/api";
-import { useApp, useMenu, useShiftRows } from "../lib/useApp";
-import type { Discrepancy, StockAddition, StockTransfer, Supplier, Wastage } from "../lib/types";
+import { useApp, useMenu, useShiftRows, useStockItems } from "../lib/useApp";
+import type { Discrepancy, Section, StockAddition, StockTransfer, Supplier, Wastage } from "../lib/types";
 import { Badge, Button, Card, Empty, ErrorBox, Field, Flash, Segmented, Title, inputCls, useFlash } from "./ui";
 import { ReceiptLink, ReceiptUpload } from "./Receipt";
 
@@ -13,10 +13,11 @@ const TABLE: Record<Kind, string> = { delivery: "stock_additions", transfer: "st
 const TITLE: Record<Kind, string> = { delivery: "Stock delivery", transfer: "Stock transfer", wastage: "Wastage" };
 const REASONS = ["Spoilt", "Spilled", "Broken", "Expired", "Staff meal", "Other"];
 
-export function Movement({ kind, suppliers }: { kind: Kind; suppliers: Supplier[] }) {
+export function Movement({ kind, section, suppliers }: { kind: Kind; section: Section; suppliers: Supplier[] }) {
   const { date, shift } = useApp();
-  const menu = useMenu(true);
-  const list = useShiftRows<Row>(TABLE[kind], "entry_date");
+  const stock = useStockItems(section);
+  const allRows = useShiftRows<Row>(TABLE[kind], "entry_date");
+  const list = { ...allRows, rows: allRows.rows.filter((r) => r.section === section) };
   const { msg, flash } = useFlash();
 
   const [item, setItem] = useState("");
@@ -28,12 +29,12 @@ export function Movement({ kind, suppliers }: { kind: Kind; suppliers: Supplier[
   const [reason, setReason] = useState(REASONS[0]!);
   const [saving, setSaving] = useState(false);
 
-  const unit = menu.items.find((m) => m.item_name === item)?.unit_type;
+  const unit = stock.items.find((m) => m.name === item)?.unit;
   const canSave = item !== "" && Number(qty) > 0 && !saving;
 
   async function save() {
     setSaving(true);
-    const base = { entry_date: date, shift, item_name: item, quantity: Number(qty) };
+    const base = { entry_date: date, shift, section, item_name: item, quantity: Number(qty) };
     const extra =
       kind === "delivery" ? { supplier_id: supplier || null, notes: notes.trim() || null }
       : kind === "transfer" ? { direction, location: location.trim() || null }
@@ -64,12 +65,12 @@ export function Movement({ kind, suppliers }: { kind: Kind; suppliers: Supplier[
   return (
     <div className="grid gap-4">
       <Card className="grid gap-4">
-        <Title>{TITLE[kind]}</Title>
-        {menu.error && <ErrorBox>{menu.error}</ErrorBox>}
+        <Title hint={section}>{TITLE[kind]}</Title>
+        {stock.error && <ErrorBox>{stock.error}</ErrorBox>}
         <Field label="Item">
           <select className={inputCls} value={item} onChange={(e) => setItem(e.target.value)}>
             <option value="">Choose item…</option>
-            {menu.items.map((m) => <option key={m.id} value={m.item_name}>{m.item_name}</option>)}
+            {stock.items.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
           </select>
         </Field>
         <Field label={`Quantity${unit ? ` (${unit})` : ""}`}>
@@ -80,7 +81,7 @@ export function Movement({ kind, suppliers }: { kind: Kind; suppliers: Supplier[
           <>
             <Field label="Supplier (optional)">
               <select className={inputCls} value={supplier} onChange={(e) => setSupplier(e.target.value)}>
-                <option value="">— none —</option>
+                <option value="">None</option>
                 {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </Field>
@@ -91,7 +92,7 @@ export function Movement({ kind, suppliers }: { kind: Kind; suppliers: Supplier[
           <>
             <Field label="Direction" group><Segmented options={["Out", "In"] as const} value={direction} onChange={setDirection} /></Field>
             <Field label={direction === "Out" ? "Sent to (optional)" : "Received from (optional)"}>
-              <input className={inputCls} placeholder="e.g. Bar, Kitchen, Butchery" value={location} onChange={(e) => setLocation(e.target.value)} />
+              <input className={inputCls} placeholder="e.g. Kitchen, Display, Butchery" value={location} onChange={(e) => setLocation(e.target.value)} />
             </Field>
           </>
         )}
@@ -189,7 +190,7 @@ export function IssueForm() {
                 <span className="font-bold tabular-nums">{formatMoney(d.amount)}</span>
               </div>
               <div className="text-sm text-muted">
-                {d.note ?? "—"}{" "}
+                {d.note ?? ""}{" "}
                 <Badge tone={d.status === "Approved" ? "green" : d.status === "Investigate" ? "amber" : "gray"}>{d.status}</Badge>
               </div>
               <ReceiptLink path={d.receipt_url} />

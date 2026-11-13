@@ -1,43 +1,45 @@
-import { useEffect, useState } from "react";
-import { deleteRow, formatMoney, formatTime, insertRow, supabase } from "../lib/api";
+// Butchery is sold by amount ("500 worth of beef"): the waiter enters Kgs and Amount,
+// the app works out the price per kg and warns if it is far from the list price.
+import { useState } from "react";
+import { deleteRow, formatMoney, formatTime, insertRow, rawPrice } from "../lib/api";
 import { round2 } from "../lib/money";
-import { useApp, useShiftRows } from "../lib/useApp";
+import { useApp, useRawItems, useShiftRows } from "../lib/useApp";
 import type { ButcherySale } from "../lib/types";
 import { Badge, Button, Card, Empty, ErrorBox, Field, Flash, Segmented, Title, inputCls, useFlash } from "../components/ui";
 
 const METHODS = ["Cash", "M-Pesa", "Unpaid"] as const;
+const TOLERANCE = 0.1; // more than 10 percent away from the list price is flagged
 
 export default function Butchery() {
   const { date, shift } = useApp();
   const sales = useShiftRows<ButcherySale>("butchery_sales", "sale_date");
+  const raw = useRawItems("Butchery");
   const { msg, flash } = useFlash();
 
   const [meat, setMeat] = useState("");
   const [kgs, setKgs] = useState("");
-  const [price, setPrice] = useState("");
+  const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<(typeof METHODS)[number]>("Cash");
   const [saving, setSaving] = useState(false);
-  const [known, setKnown] = useState<string[]>([]);
 
-  // Suggest meats entered before (just a convenience for the text box)
-  useEffect(() => {
-    void supabase.from("butchery_sales").select("meat_item").order("created_at", { ascending: false }).limit(200)
-      .then(({ data }) => setKnown([...new Set((data ?? []).map((r) => String(r.meat_item)))]));
-  }, []);
-
-  const total = round2(Number(kgs) * Number(price));
-  const canSave = meat.trim() !== "" && Number(kgs) > 0 && Number(price) > 0 && total > 0 && !saving;
+  const kg = Number(kgs);
+  const amt = Number(amount);
+  const perKg = kg > 0 && amt > 0 ? round2(amt / kg) : 0;
+  const listPrice = rawPrice(raw.items.find((r) => r.item_name === meat) ?? {}, raw.priceKey);
+  const off = listPrice > 0 && perKg > 0 ? Math.abs(perKg - listPrice) / listPrice : 0;
+  const priceFlag = off > TOLERANCE;
+  const canSave = meat !== "" && kg > 0 && amt > 0 && perKg > 0 && !saving;
 
   async function save() {
     setSaving(true);
     try {
       await insertRow("butchery_sales", {
-        sale_date: date, shift, meat_item: meat.trim(),
-        quantity_kg: Number(kgs), price_per_kg: Number(price), cost_kshs: total, payment_method: method,
-        check_status: method === "Unpaid" ? "UNPAID" : "OK",
+        sale_date: date, shift, meat_item: meat,
+        quantity_kg: kg, price_per_kg: perKg, cost_kshs: round2(amt), payment_method: method,
+        check_status: method === "Unpaid" ? "UNPAID" : priceFlag ? "CHECK PRICE" : "OK",
       });
-      flash(`Saved: ${meat.trim()} · ${formatMoney(total)}`);
-      setMeat(""); setKgs(""); setPrice(""); setMethod("Cash");
+      flash(`Saved: ${meat} · ${formatMoney(amt)}`);
+      setKgs(""); setAmount(""); setMethod("Cash");
       sales.reload();
     } catch (e) {
       flash((e as Error).message, true);
@@ -57,18 +59,30 @@ export default function Butchery() {
     <div className="grid gap-4">
       <Card className="grid gap-4">
         <Title>Butchery sale</Title>
-        <Field label="Meat item">
-          <input className={inputCls} list="meats" placeholder="e.g. Beef, Goat…" value={meat} onChange={(e) => setMeat(e.target.value)} />
-          <datalist id="meats">{known.map((k) => <option key={k} value={k} />)}</datalist>
+        {raw.error && <ErrorBox>{raw.error}</ErrorBox>}
+        <Field label="Meat" group>
+          {raw.items.length > 0 ? (
+            <Segmented options={raw.items.map((r) => r.item_name)} value={meat} onChange={setMeat} cols={Math.min(raw.items.length, 3)} />
+          ) : (
+            <Empty>No butchery items yet. The admin adds them under More, Raw items.</Empty>
+          )}
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Kgs"><input className={inputCls} inputMode="decimal" placeholder="0.00" value={kgs} onChange={(e) => setKgs(e.target.value)} /></Field>
-          <Field label="Price per kg (KSh)"><input className={inputCls} inputMode="decimal" placeholder="0" value={price} onChange={(e) => setPrice(e.target.value)} /></Field>
+          <Field label="Amount (KSh)"><input className={inputCls} inputMode="decimal" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} /></Field>
         </div>
+
         <div className="rounded-xl bg-brand p-3 text-center text-white">
-          <div className="text-sm opacity-80">Total</div>
-          <div className="text-3xl font-extrabold tabular-nums">{formatMoney(total > 0 ? total : 0)}</div>
+          <div className="text-sm opacity-80">Price per kg (worked out)</div>
+          <div className="text-3xl font-extrabold tabular-nums">{perKg > 0 ? formatMoney(perKg) : "KSh 0"}</div>
+          {listPrice > 0 && <div className="text-xs opacity-80">List price {formatMoney(listPrice)} per kg</div>}
         </div>
+        {priceFlag && (
+          <p className="rounded-xl bg-warn-soft p-3 text-center text-sm font-bold text-amber-800">
+            This is {Math.round(off * 100)}% {perKg > listPrice ? "above" : "below"} the list price. Check the weight and the amount. You can still save; the sale will be marked CHECK PRICE.
+          </p>
+        )}
+
         <Field label="Payment" group><Segmented options={METHODS} value={method} onChange={setMethod} /></Field>
         <Button disabled={!canSave} onClick={() => void save()}>{saving ? "Saving…" : "Save sale"}</Button>
       </Card>
@@ -83,8 +97,9 @@ export default function Butchery() {
               <div className="min-w-0 flex-1">
                 <div className="truncate font-bold">{s.meat_item}</div>
                 <div className="text-sm text-muted">
-                  {formatTime(s.created_at)} · {s.quantity_kg} kg × {s.price_per_kg}{" "}
-                  <Badge tone={s.payment_method === "Unpaid" ? "red" : "gray"}>{s.payment_method}</Badge>
+                  {formatTime(s.created_at)} · {s.quantity_kg} kg at {s.price_per_kg}/kg{" "}
+                  <Badge tone={s.payment_method === "Unpaid" ? "red" : "gray"}>{s.payment_method}</Badge>{" "}
+                  {s.check_status === "CHECK PRICE" && <Badge tone="amber">check price</Badge>}
                 </div>
               </div>
               <div className="font-bold tabular-nums">{formatMoney(s.cost_kshs)}</div>

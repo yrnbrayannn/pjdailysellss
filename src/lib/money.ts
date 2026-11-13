@@ -17,6 +17,32 @@ export function splitError(total: number, mpesa: number): string | null {
   return null;
 }
 
+/**
+ * Splits one order's M-Pesa amount across its lines so every line still adds up.
+ * Each line gets a share in proportion to its total; the last line takes the rounding remainder.
+ * Returns, per line, the M-Pesa part and the cash part (cash = line total - M-Pesa).
+ */
+export function allocateSplit(lineTotals: number[], mpesaTotal: number): { mpesa: number; cash: number }[] {
+  const grand = round2(lineTotals.reduce((s, n) => s + n, 0));
+  let left = round2(mpesaTotal);
+  return lineTotals.map((t, i) => {
+    const isLast = i === lineTotals.length - 1;
+    const share = isLast ? left : Math.min(left, round2((t / grand) * mpesaTotal));
+    const mpesa = Math.min(round2(t), Math.max(0, round2(share)));
+    left = round2(left - mpesa);
+    return { mpesa, cash: round2(t - mpesa) };
+  });
+}
+
+/** The payment fields for one saved line, given how much of it was paid by M-Pesa. */
+export function paymentFields(total: number, mpesa: number) {
+  const t = round2(total);
+  const m = round2(mpesa);
+  if (m <= 0) return { payment_method: "Cash" as const, cash_received: t, mpesa_part: 0, mpesa_received: 0 };
+  if (m >= t) return { payment_method: "M-Pesa" as const, cash_received: 0, mpesa_part: 0, mpesa_received: t };
+  return { payment_method: "Cash + M-Pesa" as const, cash_received: round2(t - m), mpesa_part: m, mpesa_received: m };
+}
+
 export interface Totals { sales: number; cash: number; mpesa: number; unpaid: number }
 
 type SaleLike = Pick<HotelSale, "total_cost" | "payment_method" | "cash_received" | "mpesa_part" | "mpesa_received" | "check_status">;

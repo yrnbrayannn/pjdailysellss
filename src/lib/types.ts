@@ -1,6 +1,10 @@
 export type Shift = "Day" | "Night";
-export type Role = "admin" | "staff";
+export type Role = "admin" | "cashier" | "butcher" | "staff";
+export type Section = "Display" | "Store" | "Butchery";
 export type Payment = "Cash" | "M-Pesa" | "Cash + M-Pesa" | "Unpaid";
+
+export const ROLES: readonly Role[] = ["admin", "cashier", "butcher", "staff"];
+export const SECTIONS: readonly Section[] = ["Display", "Store", "Butchery"];
 
 export interface MenuItem {
   id: string;
@@ -9,7 +13,37 @@ export interface MenuItem {
   selling_price: number;
   unit_type: string | null;
   track_stock: boolean;
+  sort_order: number;
+  /** When set, sales of this item use up the stock of the item with this name (e.g. JUICE (150) uses JUICE). */
+  stock_item: string | null;
+  /** Nicknames waiters type, comma separated and lower case (e.g. "chai"). */
+  aliases: string | null;
 }
+
+/** A raw material kept in the Store or the Butchery. The price column name is detected, see rawPrice(). */
+export interface RawItem {
+  id: string;
+  section: string;
+  item_name: string;
+  unit_type: string;
+  sort_order: number;
+  [column: string]: unknown;
+}
+
+/** Anything that can appear on a stock sheet (a menu item or a raw item), in one simple shape. */
+export interface StockItemRef {
+  name: string;
+  unit: string | null;
+  price: number; // 0 when the item has no list price
+}
+
+export interface Profile {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  role: Role;
+}
+
 export interface HotelSale {
   id: string;
   sale_date: string;
@@ -24,6 +58,10 @@ export interface HotelSale {
   mpesa_received: number | null;
   table_no: string | null;
   check_status: string | null;
+  order_ref: string | null;
+  order_type: string | null;
+  notes: string | null;
+  created_by: string | null;
   created_at: string;
 }
 export interface ButcherySale {
@@ -35,6 +73,7 @@ export interface ButcherySale {
   price_per_kg: number;
   cost_kshs: number;
   payment_method: string;
+  check_status: string | null;
   created_at: string;
 }
 export interface Expense {
@@ -44,6 +83,9 @@ export interface Expense {
   description: string;
   amount: number;
   paid_from: string;
+  department: string;
+  category: string;
+  bought_by: string | null;
   supplier_id: string | null;
   receipt_url: string | null;
   created_at: string;
@@ -58,14 +100,16 @@ export interface StockTake {
   id: string;
   stock_date: string;
   shift: Shift;
+  section: string;
   item_name: string;
   opening_qty: number;
-  closing_qty: number;
+  closing_qty: number | null; // empty until the closing count is done
 }
 export interface StockAddition {
   id: string;
   entry_date: string;
   shift: Shift;
+  section: string;
   item_name: string;
   quantity: number;
   supplier_id: string | null;
@@ -76,16 +120,19 @@ export interface StockTransfer {
   id: string;
   entry_date: string;
   shift: Shift;
+  section: string;
   item_name: string;
   quantity: number;
   direction: "Out" | "In";
   location: string | null;
+  notes: string | null;
   created_at: string;
 }
 export interface Wastage {
   id: string;
   entry_date: string;
   shift: Shift;
+  section: string;
   item_name: string;
   quantity: number;
   reason: string | null;
@@ -105,7 +152,7 @@ export interface Discrepancy {
   created_at: string;
 }
 export interface AuditLog {
-  id: number;
+  id: number | string;
   table_name: string;
   record_id: string | null;
   action: "UPDATE" | "DELETE";

@@ -16,22 +16,31 @@ export default function Menu() {
   const [price, setPrice] = useState("");
   const [unit, setUnit] = useState("plate");
   const [track, setTrack] = useState(true);
+  const [aliases, setAliases] = useState("");
+  const [stockItem, setStockItem] = useState("");
   const [saving, setSaving] = useState(false);
 
   const canSave = name.trim() !== "" && category.trim() !== "" && Number(price) >= 0 && price !== "" && !saving;
   const categories = [...new Set(menu.items.map((i) => i.category))];
 
-  function reset() { setEditing(null); setName(""); setCategory(""); setPrice(""); setUnit("plate"); setTrack(true); }
+  function reset() { setEditing(null); setName(""); setCategory(""); setPrice(""); setUnit("plate"); setTrack(true); setAliases(""); setStockItem(""); }
 
   function edit(i: MenuItem) {
     setEditing(i.id); setName(i.item_name); setCategory(i.category);
     setPrice(String(i.selling_price)); setUnit(i.unit_type ?? ""); setTrack(i.track_stock);
+    setAliases(i.aliases ?? ""); setStockItem(i.stock_item ?? "");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function save() {
     setSaving(true);
-    const row = { item_name: name.trim(), category: category.trim(), selling_price: Number(price), unit_type: unit.trim() || null, track_stock: track };
+    // Nicknames are saved lower case, comma separated, without blanks or repeats.
+    const nick = [...new Set(aliases.toLowerCase().split(",").map((a) => a.trim()).filter(Boolean))].join(",");
+    const row = {
+      item_name: name.trim(), category: category.trim(), selling_price: Number(price), unit_type: unit.trim() || null,
+      track_stock: track, aliases: nick || null, stock_item: stockItem || null,
+      ...(editing ? {} : { sort_order: Math.max(0, ...menu.items.map((m) => m.sort_order ?? 0)) + 1 }),
+    };
     try {
       if (editing) await updateRows("menu_items", [editing], row);
       else await insertRow("menu_items", row);
@@ -64,6 +73,15 @@ export default function Menu() {
             <datalist id="units">{UNITS.map((u) => <option key={u} value={u} />)}</datalist>
           </Field>
         </div>
+        <Field label="Nicknames (what waiters type, separated by commas)">
+          <input className={inputCls} placeholder="e.g. chai, tea" autoCapitalize="none" value={aliases} onChange={(e) => setAliases(e.target.value)} />
+        </Field>
+        <Field label="Uses the stock of (optional)">
+          <select className={inputCls} value={stockItem} onChange={(e) => setStockItem(e.target.value)}>
+            <option value="">Its own stock</option>
+            {menu.items.filter((m) => m.id !== editing && !m.stock_item).map((m) => <option key={m.id} value={m.item_name}>{m.item_name}</option>)}
+          </select>
+        </Field>
         <label className="flex min-h-14 items-center gap-3 rounded-xl border-2 border-line px-4">
           <input type="checkbox" className="h-6 w-6" checked={track} onChange={(e) => setTrack(e.target.checked)} />
           <span className="font-semibold">Count in stock (shows on the Stock Count)</span>
@@ -82,6 +100,8 @@ export default function Menu() {
               <div className="min-w-0 flex-1">
                 <div className="truncate font-bold">{i.item_name}</div>
                 <div className="text-sm text-muted">{i.category} · {formatMoney(i.selling_price)}{i.unit_type ? ` / ${i.unit_type}` : ""} {i.track_stock && <Badge tone="green">stock</Badge>}</div>
+                {i.aliases && <div className="truncate text-xs text-muted">Nicknames: {i.aliases}</div>}
+                {i.stock_item && <div className="text-xs text-muted">Uses stock of {i.stock_item}</div>}
               </div>
               <Button small variant="outline" onClick={() => edit(i)}>Edit</Button>
               <Button small variant="danger" onClick={() => void remove(i)} aria-label="Delete">✕</Button>

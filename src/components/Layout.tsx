@@ -7,20 +7,21 @@ import type { AppCtx } from "../lib/useApp";
 import type { Role, Shift } from "../lib/types";
 import { ErrorBox } from "./ui";
 
-const staffNav = [
-  { to: "/orders", icon: "🧾", label: "Orders" },
-  { to: "/butchery", icon: "🥩", label: "Butchery" },
-  { to: "/stock", icon: "📦", label: "Stock" },
-  { to: "/expenses", icon: "💸", label: "Expenses" },
-  { to: "/more", icon: "⋯", label: "More" },
-];
-const adminNav = [
-  { to: "/dashboard", icon: "📊", label: "Dashboard" },
-  { to: "/orders", icon: "🧾", label: "Orders" },
-  { to: "/butchery", icon: "🥩", label: "Butchery" },
-  { to: "/stock", icon: "📦", label: "Stock" },
-  { to: "/more", icon: "⋯", label: "More" },
-];
+const ORDERS = { to: "/orders", icon: "🧾", label: "Orders" };
+const BUTCHERY = { to: "/butchery", icon: "🥩", label: "Butchery" };
+const STOCK = { to: "/stock", icon: "📦", label: "Stock" };
+const EXPENSES = { to: "/expenses", icon: "💸", label: "Expenses" };
+const MORE = { to: "/more", icon: "⋯", label: "More" };
+
+/** Bottom navigation per role. Keep it to 5 buttons so it stays easy to tap. */
+const NAV: Record<Role, { to: string; icon: string; label: string }[]> = {
+  admin: [{ to: "/dashboard", icon: "📊", label: "Dashboard" }, ORDERS, BUTCHERY, STOCK, MORE],
+  cashier: [{ to: "/dashboard", icon: "📊", label: "Handover" }, ORDERS, BUTCHERY, STOCK, MORE],
+  butcher: [BUTCHERY, STOCK, EXPENSES, MORE],
+  staff: [ORDERS, STOCK, EXPENSES, MORE],
+};
+
+const KNOWN_ROLES: Role[] = ["admin", "cashier", "butcher", "staff"];
 
 export default function Layout() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -36,14 +37,14 @@ export default function Layout() {
     return () => data.subscription.unsubscribe();
   }, []);
 
-  // 2. what is their role? (profiles.role = 'admin' | 'staff')
+  // 2. what is their role? (profiles.role = admin, cashier, butcher or staff)
   const userId = session?.user.id;
   useEffect(() => {
     if (!userId) { setRole(null); return; }
     void supabase.from("profiles").select("role").eq("id", userId).maybeSingle().then(({ data, error }) => {
       if (error) { setSetupError(`Could not read your profile: ${error.message}. Has supabase/schema.sql been run?`); setRole("staff"); }
       else if (!data) { setSetupError("No profile found for this login. Run supabase/schema.sql in Supabase."); setRole("staff"); }
-      else { setSetupError(null); setRole(data.role as Role); }
+      else { setSetupError(null); setRole(KNOWN_ROLES.includes(data.role as Role) ? (data.role as Role) : "staff"); }
     });
   }, [userId]);
 
@@ -53,7 +54,7 @@ export default function Layout() {
   if (!session || !role) return <Navigate to="/login" replace />;
 
   const ctx: AppCtx = { date, shift, role, userId: session.user.id, email: session.user.email ?? "" };
-  const nav = role === "admin" ? adminNav : staffNav;
+  const nav = NAV[role];
 
   return (
     <div className="min-h-screen">
@@ -90,7 +91,7 @@ export default function Layout() {
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-white pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto grid max-w-2xl grid-cols-5">
+        <div className="mx-auto grid max-w-2xl" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>
           {nav.map((n) => (
             <NavLink
               key={n.to} to={n.to}

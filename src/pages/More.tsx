@@ -9,11 +9,15 @@ export default function More() {
     role === "admin"
       ? [
           { to: "/expenses", label: "💸 Expenses" },
-          { to: "/menu", label: "🍽️ Menu & prices" },
+          { to: "/menu", label: "🍽️ Menu, prices and nicknames" },
+          { to: "/raw-items", label: "🧂 Raw items (Store and Butchery)" },
+          { to: "/team", label: "👥 Team and roles" },
           { to: "/suppliers", label: "🚚 Suppliers" },
           { to: "/audit", label: "🕵️ Audit log" },
         ]
-      : [];
+      : role === "cashier"
+        ? [{ to: "/expenses", label: "💸 Expenses" }]
+        : [];
 
   return (
     <div className="grid gap-4">
